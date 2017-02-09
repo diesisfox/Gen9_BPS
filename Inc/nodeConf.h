@@ -39,5 +39,13 @@
 #define HB_Interval		1000		// Node heartbeat send interval	(soft ms)
 #define WD_Interval		16			// Watdog timer refresh interval (soft ms) | MUST BE LESS THAN 26!!!
 
+#define RT_Interval		50
+#define SMT_Interval	500
+#define TMT_Interval	500
+
+#define RT_Broadcast	20			//Multiplier of RT_Interval
+
+#define FToffset		0x0d0
+
 
 #endif /* NODECONF_H_ */

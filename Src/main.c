@@ -4,7 +4,7 @@
   * Description        : Main program body
   ******************************************************************************
   *
-  * Copyright (c) 2016 STMicroelectronics International N.V. 
+  * Copyright (c) 2017 STMicroelectronics International N.V. 
   * All rights reserved.
   *
   * Redistribution and use in source and binary forms, with or without 
@@ -55,10 +55,22 @@
 // RTOS Task functions + helpers
 #include "Can_Processor.h"
 
+//LTC6804
+#include "LTC6804_lib.h"
+
+//MCP3909
+#include "mcp3909.h"
+
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
 CAN_HandleTypeDef hcan1;
+
+CRC_HandleTypeDef hcrc;
+
+SPI_HandleTypeDef hspi1;
+DMA_HandleTypeDef hdma_spi1_rx;
+DMA_HandleTypeDef hdma_spi1_tx;
 
 UART_HandleTypeDef huart2;
 DMA_HandleTypeDef hdma_usart2_rx;
@@ -68,6 +80,9 @@ WWDG_HandleTypeDef hwwdg;
 
 osThreadId ApplicationHandle;
 osThreadId Can_ProcessorHandle;
+osThreadId RTHandle;
+osThreadId SMTHandle;
+osThreadId TMTHandle;
 osMessageQId mainCanTxQHandle;
 osMessageQId mainCanRxQHandle;
 osMessageQId MysteryQHandle;
@@ -77,6 +92,8 @@ osMutexId swMtxHandle;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
+ltc68041ChainHandle h6804;
+MCP3909HandleTypeDef h3909;
 
 #ifdef FRANK
 const uint32_t firmwareString = 0x00000100;	// v00.00.01.0
@@ -90,10 +107,10 @@ uint32_t selfStatusWord = 0x0;
 #define NODE_CONFIGURED
 #else
 // SW_Sentinel will fail the CC firmware check and result in node addition failure!
-static const uint32_t firmwareString = ;			// Firmware Version string
-
-static const uint8_t selfNodeID = ;					// The nodeID of this node
-uint32_t selfStatusWord = ;							// Initialize
+static const uint32_t firmwareString = 0x00000001;			// Firmware Version string
+static const uint8_t selfNodeID = bps_nodeID;					// The nodeID of this node
+uint32_t selfStatusWord = INIT;							// Initialize
+#define NODE_CONFIGURED
 #endif
 
 #ifndef NODE_CONFIGURED
@@ -109,8 +126,13 @@ static void MX_DMA_Init(void);
 static void MX_CAN1_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_WWDG_Init(void);
+static void MX_CRC_Init(void);
+static void MX_SPI1_Init(void);
 void doApplication(void const * argument);
 void doProcessCan(void const * argument);
+void doRT(void const * argument);
+void doSMT(void const * argument);
+void doTMT(void const * argument);
 void TmrKickDog(void const * argument);
 void TmrSendHB(void const * argument);
 
@@ -149,6 +171,8 @@ int main(void)
   MX_CAN1_Init();
   MX_USART2_UART_Init();
   MX_WWDG_Init();
+  MX_CRC_Init();
+  MX_SPI1_Init();
 
   /* USER CODE BEGIN 2 */
   Serial2_begin();
@@ -161,10 +185,10 @@ int main(void)
   bxCan_addMaskedFilterStd(0,0,0); // Filter: Status word group (ignore nodeID)
   bxCan_addMaskedFilterExt(0,0,0);
 
-#ifdef __JAMES__
-  bxCan_setTxCallback(can_rx_cb);
-#endif
+  ltc68041ChainInitStruct hltcinit;
+  //TODO
 
+  mcp3909_init(&hspi1, &h3909);
   /* USER CODE END 2 */
 
   /* Create the mutex(es) */
@@ -203,6 +227,18 @@ int main(void)
   /* definition and creation of Can_Processor */
   osThreadDef(Can_Processor, doProcessCan, osPriorityBelowNormal, 0, 512);
   Can_ProcessorHandle = osThreadCreate(osThread(Can_Processor), NULL);
+
+  /* definition and creation of RT */
+  osThreadDef(RT, doRT, osPriorityHigh, 0, 512);
+  RTHandle = osThreadCreate(osThread(RT), NULL);
+
+  /* definition and creation of SMT */
+  osThreadDef(SMT, doSMT, osPriorityAboveNormal, 0, 512);
+  SMTHandle = osThreadCreate(osThread(SMT), NULL);
+
+  /* definition and creation of TMT */
+  osThreadDef(TMT, doTMT, osPriorityAboveNormal, 0, 512);
+  TMTHandle = osThreadCreate(osThread(TMT), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -334,6 +370,51 @@ static void MX_CAN1_Init(void)
 
 }
 
+/* CRC init function */
+static void MX_CRC_Init(void)
+{
+
+  hcrc.Instance = CRC;
+  hcrc.Init.DefaultPolynomialUse = DEFAULT_POLYNOMIAL_DISABLE;
+  hcrc.Init.DefaultInitValueUse = DEFAULT_INIT_VALUE_DISABLE;
+  hcrc.Init.GeneratingPolynomial = 50585;
+  hcrc.Init.CRCLength = CRC_POLYLENGTH_16B;
+  hcrc.Init.InitValue = 16;
+  hcrc.Init.InputDataInversionMode = CRC_INPUTDATA_INVERSION_NONE;
+  hcrc.Init.OutputDataInversionMode = CRC_OUTPUTDATA_INVERSION_DISABLE;
+  hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_BYTES;
+  if (HAL_CRC_Init(&hcrc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+}
+
+/* SPI1 init function */
+static void MX_SPI1_Init(void)
+{
+
+  hspi1.Instance = SPI1;
+  hspi1.Init.Mode = SPI_MODE_MASTER;
+  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;
+  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi1.Init.NSS = SPI_NSS_HARD_OUTPUT;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi1.Init.CRCPolynomial = 7;
+  hspi1.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
+  hspi1.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  if (HAL_SPI_Init(&hspi1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+}
+
 /* USART2 init function */
 static void MX_USART2_UART_Init(void)
 {
@@ -380,6 +461,12 @@ static void MX_DMA_Init(void)
   LL_AHB1_GRP1_EnableClock(LL_AHB1_GRP1_PERIPH_DMA1);
 
   /* DMA interrupt init */
+  /* DMA1_Channel2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
+  /* DMA1_Channel3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
   /* DMA1_Channel6_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel6_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel6_IRQn);
@@ -399,8 +486,21 @@ static void MX_DMA_Init(void)
 static void MX_GPIO_Init(void)
 {
 
+  GPIO_InitTypeDef GPIO_InitStruct;
+
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, BMS_CS_Pin|BPS_KILL_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pins : BMS_CS_Pin BPS_KILL_Pin */
+  GPIO_InitStruct.Pin = BMS_CS_Pin|BPS_KILL_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
 }
 
@@ -432,6 +532,42 @@ void doProcessCan(void const * argument)
 		Can_Processor();
 	}
   /* USER CODE END doProcessCan */
+}
+
+/* doRT function */
+void doRT(void const * argument)
+{
+  /* USER CODE BEGIN doRT */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(RT_Interval);
+  }
+  /* USER CODE END doRT */
+}
+
+/* doSMT function */
+void doSMT(void const * argument)
+{
+  /* USER CODE BEGIN doSMT */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(SMT_Interval);
+  }
+  /* USER CODE END doSMT */
+}
+
+/* doTMT function */
+void doTMT(void const * argument)
+{
+  /* USER CODE BEGIN doTMT */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(TMT_Interval);
+  }
+  /* USER CODE END doTMT */
 }
 
 /* TmrKickDog function */

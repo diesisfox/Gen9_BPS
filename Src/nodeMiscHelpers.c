@@ -120,3 +120,29 @@ inline void soft_shutdown(void(*usr_clbk)()){
 	// TODO: Test if bxCan_sendFrame can successfully send the new frame and flush the queue
 }
 
+/*
+ * Routine for bps line asserting and the saving of data beforehand, with its support functions
+ */
+void fault_save_data(){
+	//stubby
+}
+
+void assert_bps_fault(uint16_t addr, uint32_t value){	//addr and vale of out of line reading
+	//what the name says
+	fault_save_data();
+
+	// Broadcast bps fault to main CAN
+	Can_frame_t newFrame;
+	newFrame.id = ftOffset + selfNodeID;
+	newFrame.dlc = CAN_FT_DLC;
+	newFrame.Data[0] = addr >> 8;
+	newFrame.Data[1] = addr & 0xf;
+	for(int i=0; i<4; i++){
+		newFrame.Data[5-i] = (value >> (8*i)) & 0xff;	// Convert uint32_t -> uint8_t
+	}
+	bxCan_sendFrame(&newFrame);
+
+	//assert signal
+	HAL_GPIO_WritePin(BPS_KILL_GPIO_Port, BPS_KILL_Pin, RESET);
+}
+
