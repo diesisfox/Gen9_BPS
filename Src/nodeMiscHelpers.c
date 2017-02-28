@@ -127,14 +127,14 @@ void fault_save_data(){
 	//stubby
 }
 
-void assert_bps_fault(uint16_t addr, uint32_t value){	//addr and vale of out of line reading
+void assert_bps_fault(uint16_t addr, uint32_t value){	//addr and value of out of line reading
 	//what the name says
 	fault_save_data();
 
 	// Broadcast bps fault to main CAN
 	Can_frame_t newFrame;
-	newFrame.id = ftOffset + selfNodeID;
-	newFrame.dlc = CAN_FT_DLC;
+	newFrame.id = bpsTrip;
+	newFrame.dlc = bpsTrip_DLC;
 	newFrame.Data[0] = addr >> 8;
 	newFrame.Data[1] = addr & 0xf;
 	for(int i=0; i<4; i++){

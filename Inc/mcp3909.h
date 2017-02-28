@@ -13,136 +13,201 @@
 // NOTE: the Tx Buffer should always have the first byte empty for the CONTROL BYTE!
 // Tx and Rx buffers must both be declared and allocated globally before the functions
 
-// States: INIT, SHUTDOWN
+#define SPI_TIMEOUT		1000 	// SPI Synchronous blocking timeout - milliseconds
+#define T_POR			50		// Power on reset wait time
 
 // Register Addresses
-#define CHANNEL_0   0x00
-#define CHANNEL_1   0x01
-#define CHANNEL_2   0x02
-#define CHANNEL_3   0x03
-#define CHANNEL_4   0x04
-#define Channle_5   0x05
-#define MOD         0x06U
-#define PHASE       0x07U
-#define GAIN        0x08U
-#define STATUS      0x09
-#define CONFIG      0x0A
+#define CHANNEL_0   (0x0U)
+#define CHANNEL_1   (0x1U)
+#define CHANNEL_2   (0x2U)
+#define CHANNEL_3   (0x3U)
+#define CHANNEL_4   (0x4U)
+#define CHANNEL_5   (0x5U)
+#define MOD         (0x6U)
+#define PHASE       (0x7U)
+#define GAIN        (0x8U)
+#define STATUS      (0x9U)
+#define CONFIG      (0xAU)
 
-#define SPI_TIMEOUT	100
+// CHANNEL REGISTER START -----------------------------
+// Channel data length
+#define MAX_CHANNEL_NUM   (6U)
+#define MAX_CHN_SET_NUM   (3U)
+#define REGS_NUM		  (11U)
+#define REG_LEN           (3U)
+#define CTRL_LEN		  (1U)
+#define CHN_GROUP_LEN     (2U) * REG_LEN
+#define MOD_GROUP_LEN     (3U) * REG_LEN
+#define STATUS_GROUP_LEN  (2U) * REG_LEN
+#define CHN_TYPE_LEN      REG_LEN * MAX_CHANNEL_NUM
+#define CONFIG_TYPE_LEN   MOD_GROUP_LEN + STATUS_GROUP_LEN
+#define TOTAL_LEN         (11U) * REG_LEN
+// CHANNEL REGISTER END   -----------------------------
 
-// Programmable gain amplifier ratio
-typedef enum {
-  PGA_1 = 0,
-  PGA_2,
-  PGA_4,
-  PGA_8,
-  PGA_16,
-  PGA_32
-} PGA_Conf;
+// GAIN REGISTER START    -----------------------------
+// PGA settings
+#define PGA_1       (0U)
+#define PGA_2       (1U)
+#define PGA_4       (2U)
+#define PGA_8       (3U)
+#define PGA_16      (4U)
+#define PGA_32      (5U)
 
-typedef enum {
-  ADC_SHUTDOWN,           // Converters and biases off (low-power mode)
-  ADC_RESET,              // Converters active, output forced to 0
-  ADC_ON                  // Converters active, output adc values
-} ADC_mode;
+#define BOOST_OFFSET     (3U)
+#define PGA_BOOST_LEN    (5U)
 
-// Analog main clock prescaler
-typedef enum {
-  PRESCALE_1 = 0,         // Default
-  PRESECLE_2,
-  PRESCALE_4,
-  PRESCALE_8
-} prescale_CONF;
+// Boost settings
+#define BOOST_ON    (1U)
+#define BOOST_OFF   (0U)
+// GAIN REGISTER END      -----------------------------
 
-// Oversampling ratio
-typedef enum {
-  OSR_32 = 0,
-  OSR_64,                 // Default
-  OSR_128,
-  OSR_256
-} OSR_CONF;
+// STATUS REGISTER START  -----------------------------
+// Register read behavior
+#define READ_SINGLE   (0U)
+#define READ_GROUP    (1U)
+#define READ_TYPE     (2U)
+#define READ_ALL      (3U)
 
-// ADC dither control
-#define DITHER_ON     1
-#define DITHER_OFF    0
+// Resolution
+#define RES_24        (1U)
+#define RES_16        (0U)
 
-// ADC resolution mode
-#define RES_24        1
-#define RES_16        0
+// 3 Cycle data latency for sinc3 filter settle time
+#define DR_LTY_ON     (1U)
+#define DR_LTY_OFF    (0U)
 
-// ADC boost mode
-#define BOOST_ON      1
-#define BOOST_OFF     0
+// High impedence when data NOT ready
+#define DR_HIZ_ON     (0U)
+#define DR_HIZ_OFF    (1U)
 
-// Reference voltage source
-#define EXT_VREF      1    // External Vref
-#define INT_VREF      0    // Internal Vref (2.35V +- 2%)
+// Data ready link control
+#define DR_LINK_ON    (1U)
+#define DR_LINK_OFF   (0U)
 
-// Clock source setting
-#define EXT_CLK       1    // External high speed clock to OSC1
-#define OSC_CLK       0    // Crystal oscillator between OSC1 and OSC2
+// Data ready control Mode
+#define DR_MODE_0    (0U)
+#define DR_MODE_1    (1U)
+#define DR_MODE_2    (2U)
+#define DR_MODE_3    (3U)
 
-#define READ_SINGLE   0    // Read a single register
-#define READ_GROUP    1    // Read a register group
-#define READ_TYPE     2    // Read a register type
-#define REAL_ALL      3    // Read all onboard registers
+// Bit offsets
+#define DRSTATUS_CH_OFFSET  (0U)
+#define DRA_MODE_OFFSET   (6U)
+#define DRB_MODE_OFFSET   (8U)
+#define DRC_MODE_OFFSET   (10U)
+#define DR_LINK_OFFSET    (12U)
+#define DR_HIZ_OFFSET     (13U)
+#define DR_LTY_OFFSET     (14U)
+#define RES_CHN_OFFSET    (15U)
+#define READ_MODE_OFFSET  (22U)
+// STATUS REGISTER END    -----------------------------
 
-#define REG_LEN		  3	   // Register data length
 
-// Register read lengths
-#define READ_SINGLE_LEN			3
-#define READ_STATUS_GROUP_LEN	6
-#define READ_CHN_GROUP_LEN		6
-#define READ_MOD_GROUP_LEN		9
-#define READ_TYPE_LEN			18
-#define READ_ALL_LEN			33
+// CONFIG REGISTER START  -----------------------------
+// Reset mode
+#define RESET_ON          (1U)
+#define RESET_OFF         (0U)
 
-#define MAX_CHANNELS  6    // 6 ADC Channels on MCP3909
+// Shutdown mode
+#define SHUTDOWN_ON       (1U)
+#define SHUTDOWN_OFF      (0U)
 
+// Dither mode
+#define DITHER_ON         (1U)
+#define DITHER_OFF        (0U)
+
+// Over Sampling ratio settings
+#define OSR_32            (0U)
+#define OSR_64            (1U)
+#define OSR_128           (2U)
+#define OSR_256           (3U)
+
+// Prescaler settings
+#define PRESCALE_1        (0U)
+#define PRESCALE_2        (1U)
+#define PRESCALE_4        (2U)
+#define PRESCALE_8        (3U)
+
+// External voltage reference select
+#define EXTVREF_ON        (1U)
+#define EXTVREF_OFF       (0U)
+
+// External clock source select
+#define EXTCLK_ON         (1U)
+#define EXTCLK_OFF        (0U)
+
+// Bit offsets
+#define EXTCLK_OFFSET       (0U)
+#define EXTVREF_OFFSET      (1U)
+#define PRESCALE_OFFSET     (2U)
+#define OSR_OFFSET          (4U)
+#define DITHER_CHN_OFFSET   (6U)
+#define SHUTDOWN_CHN_OFFSET (12U)
+#define RESET_CHN_OFFSET    (18U)
+// CONFIG REGISTER END    -----------------------------
+
+// MCP3909 individual channel configurations
 typedef struct {
-  uint8_t   channel;      // Channel number
-  uint8_t	readType;
-  PGA_Conf  PGA;          // ADC gain setting
-  ADC_mode  mode;          // ADC operating mode selection
+  uint8_t   PGA;          // ADC gain setting
+  uint8_t   shutdown;     // ADC shutdown mode
+  uint8_t	reset;		  // ADC reset mode
   uint8_t   dither;       // ADC dither filter
   uint8_t   resolution;   // ADC resolution
   uint8_t   boost;        // ADC boost mode
-} channel_Conf;
+} Channel_Conf;
 
+// MCP3909 Handle
 typedef struct {
   SPI_HandleTypeDef *	hspi;	// SPI Handle object
+  uint8_t       * volatile pRxBuf;     // DMA Rx Buffer
+  uint8_t       * volatile pTxBuf;     // DMA Tx Buffer ; User functions may use this buffer for transmission staging
   uint8_t		readType;		// Read single, type, group, all registers
-  prescale_CONF prescale;
-  OSR_CONF      osr;
+  uint8_t       prescale;
+  uint8_t       osr;
   uint8_t       extCLK;
   uint8_t       extVREF;
-  channel_Conf  channel[6];
-  uint8_t *		phase;
-  uint8_t *     pRxBuf;     // Rx Buffer
-  uint8_t *     pTxBuf;     // Tx Buffer
+  uint8_t       phase[MAX_CHN_SET_NUM];
+  Channel_Conf  channel[MAX_CHANNEL_NUM];
+  uint32_t		registers[REGS_NUM];
 } MCP3909HandleTypeDef;
 
+// User library functions
+// DO NOT USE AFTER RTOS SCHEDULER STARTS!!!!!!!!!
+uint8_t mcp3909_SPI_WriteRegSync(MCP3909HandleTypeDef * hmcp, uint8_t address, uint8_t * data, uint8_t length, uint32_t timeout);
+uint8_t mcp3909_SPI_ReadRegSync(MCP3909HandleTypeDef * hmcp, uint8_t address, uint8_t * buffer, uint8_t readLen, uint8_t readType, uint32_t timeout);
 
-// Initializes mcp3909
-// Sets clock source, reference source, prescaler, and OSR
-// Writes the commands to SPI
-uint8_t mcp3909_init(SPI_HandleTypeDef * hspi, MCP3909HandleTypeDef * hmcp);
 
-// Reads back all configuration registers from MCP3909 and verifies against the defined handle
+// USE AFTER SCHEDULER STARTS
+uint8_t _mcp3909_SPI_WriteReg(MCP3909HandleTypeDef * hmcp, uint8_t address);
+
+// SPI Utility functions
+uint8_t mcp3909_SPI_WriteReg(MCP3909HandleTypeDef * hmcp, uint8_t address, uint8_t * data, uint8_t length); // Copies data into pTxBuf
+uint8_t mcp3909_SPI_ReadReg(MCP3909HandleTypeDef * hmcp, uint8_t address, uint8_t * buffer, uint8_t readType, uint8_t length);  // Read data into user-defined buffer address
+uint8_t mcp3909_SPI_ReadGroup(MCP3909HandleTypeDef * hmcp, uint8_t address, uint8_t * buffer);  // Read data into user-defined buffer address
+uint8_t mcp3909_SPI_ReadType(MCP3909HandleTypeDef * hmcp, uint8_t address, uint8_t * buffer);
+uint8_t mcp3909_SPI_ReadAll(MCP3909HandleTypeDef * hmcp, uint8_t address, uint8_t * buffer);  // Read data into user-defined buffer address
+
+// Initialization
+uint8_t mcp3909_init(MCP3909HandleTypeDef * hmcp);
+
+// Setting verification
 uint8_t mcp3909_verify(MCP3909HandleTypeDef * hmcp);
 
-// Put all channels into shutdown mode, vref=clk=1;
-uint8_t mcp3909_shutdown_all_channels(MCP3909HandleTypeDef * hmcp);
+// Enter low-power mode
+uint8_t mcp3909_sleep(MCP3909HandleTypeDef * hmcp);
 
-// SPI Utilities
-uint8_t mcp3909_SPI_WriteReg(MCP3909HandleTypeDef * hmcp, uint8_t address, uint8_t length);
+// Exit low-power mode
+uint8_t mcp3909_wakeup(MCP3909HandleTypeDef * hmcp);
 
-uint8_t mcp3909_SPI_ReadReg(MCP3909HandleTypeDef * hmcp, uint8_t length, uint8_t readType);
+// Obtain channel info
+uint8_t mcp3909_readAllChannels(MCP3909HandleTypeDef * hmcp, uint8_t * buffer);
 
-uint8_t mcp3909_channel_dataRead(MCP3909HandleTypeDef * hmcp, uint8_t channelNum);
+uint8_t mcp3909_readChannel(MCP3909HandleTypeDef * hmcp, uint8_t channelNum, uint8_t * buffer);
 
-uint32_t readChannel(MCP3909HandleTypeDef * hmcp, uint8_t channelNum, uint32_t buf);
+// Parse the data in the DMA Rx buffer and store to MCP Handle registers
+void mcp3909_parseChannelData(MCP3909HandleTypeDef * hmcp);
 
-uint8_t readChannelPair(MCP3909HandleTypeDef * hmcp, uint8_t channelGroup, uint32_t * buf);
+void bytesToReg(uint8_t * byte, uint32_t * reg);
+void regToBytes(uint32_t * reg, uint8_t * bytes);
 
 #endif /* MCP3909_H_ */

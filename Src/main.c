@@ -56,7 +56,7 @@
 #include "Can_Processor.h"
 
 //LTC6804
-#include "LTC6804_lib.h"
+#include "LTC68041.h"
 
 //MCP3909
 #include "mcp3909.h"
@@ -69,8 +69,11 @@ CAN_HandleTypeDef hcan1;
 CRC_HandleTypeDef hcrc;
 
 SPI_HandleTypeDef hspi1;
+SPI_HandleTypeDef hspi3;
 DMA_HandleTypeDef hdma_spi1_rx;
 DMA_HandleTypeDef hdma_spi1_tx;
+DMA_HandleTypeDef hdma_spi3_tx;
+DMA_HandleTypeDef hdma_spi3_rx;
 
 UART_HandleTypeDef huart2;
 DMA_HandleTypeDef hdma_usart2_rx;
@@ -85,33 +88,27 @@ osThreadId SMTHandle;
 osThreadId TMTHandle;
 osMessageQId mainCanTxQHandle;
 osMessageQId mainCanRxQHandle;
-osMessageQId MysteryQHandle;
 osTimerId WWDGTmrHandle;
 osTimerId HBTmrHandle;
 osMutexId swMtxHandle;
+osSemaphoreId mcp3909_DRHandle;
+osSemaphoreId mcp3909_RXHandle;
+osSemaphoreId bmsTRxCompleteHandle;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
-ltc68041ChainHandle h6804;
 MCP3909HandleTypeDef h3909;
+bmsChainHandleTypeDef hbms1;
 
-#ifdef FRANK
-const uint32_t firmwareString = 0x00000100;	// v00.00.01.0
-const uint8_t selfNodeID = 6;	// Radio
-uint32_t selfStatusWord = 0x0;
-#define NODE_CONFIGURED
-#elif defined (__JAMES__)
-static const uint32_t firmwareString = 0x00000100;
-static const uint8_t selfNodeID = 6;
-uint32_t selfStatusWord = 0x0;
-#define NODE_CONFIGURED
-#else
+MCP3909HandleTypeDef hmcp1;
+uint8_t mcpRxBuf[REG_LEN * REGS_NUM];
+uint8_t mcpTxBuf[REG_LEN * REGS_NUM + CTRL_LEN];
+
 // SW_Sentinel will fail the CC firmware check and result in node addition failure!
-static const uint32_t firmwareString = 0x00000001;			// Firmware Version string
-static const uint8_t selfNodeID = bps_nodeID;					// The nodeID of this node
+const uint32_t firmwareString = 0x00000001;			// Firmware Version string
+const uint8_t selfNodeID = bps_nodeID;					// The nodeID of this node
 uint32_t selfStatusWord = INIT;							// Initialize
 #define NODE_CONFIGURED
-#endif
 
 #ifndef NODE_CONFIGURED
 #error "NODE NOT CONFIGURED. GO CONFIGURE IT IN NODECONF.H!"
@@ -128,6 +125,7 @@ static void MX_USART2_UART_Init(void);
 static void MX_WWDG_Init(void);
 static void MX_CRC_Init(void);
 static void MX_SPI1_Init(void);
+static void MX_SPI3_Init(void);
 void doApplication(void const * argument);
 void doProcessCan(void const * argument);
 void doRT(void const * argument);
@@ -138,15 +136,66 @@ void TmrSendHB(void const * argument);
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
-#ifdef __JAMES__
-void can_rx_cb(){
-	static uint8_t cantxmsg[] = "CAN Tx'd.\n";
-	Serial2_writeBuf(cantxmsg);
+
+// Data Ready pin triggered callback (PA1)
+void HAL_GPIO_EXTI_Callback(uint16_t pinNum){
+	if(pinNum & GPIO_PIN_1){
+		HAL_NVIC_DisableIRQ(EXTI1_IRQn);
+		mcp3909_readAllChannels(&hmcp1,hmcp1.pRxBuf);
+	}
 }
-#endif
+
+void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi){
+	// Check which SPI issued interrupt
+	if(hspi == (hbms1.hspi)){
+		HAL_GPIO_WritePin(BMS_CS_GPIO_Port,BMS_CS_Pin, GPIO_PIN_SET);
+		xSemaphoreGiveFromISR(bmsTRxCompleteHandle, NULL);
+	}else if(hspi == (hmcp1.hspi)){
+		HAL_GPIO_WritePin(MCP_CS_GPIO_Port,MCP_CS_Pin, GPIO_PIN_SET);
+		xSemaphoreGiveFromISR(mcp3909_RXHandle, NULL);
+	}
+}
+
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi){
+	// Check which SPI issued interrupt
+	if(hspi == (hbms1.hspi)){
+		HAL_GPIO_WritePin(BMS_CS_GPIO_Port,BMS_CS_Pin, GPIO_PIN_SET);
+	}else if(hspi == (hmcp1.hspi)){
+		HAL_GPIO_WritePin(MCP_CS_GPIO_Port,MCP_CS_Pin, GPIO_PIN_SET);
+	}
+}
+
+void EM_Init(void);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
+void EM_Init(){
+	hmcp1.phase[0] = 0;
+	hmcp1.phase[1] = 0;
+	hmcp1.phase[2] = 0;
+
+	for(uint8_t i= 0; i < MAX_CHANNEL_NUM; i++){
+		hmcp1.channel[i].PGA = PGA_1;
+		hmcp1.channel[i].boost = BOOST_OFF;
+		hmcp1.channel[i].dither = DITHER_ON;
+		hmcp1.channel[i].reset = RESET_OFF;
+		hmcp1.channel[i].shutdown = SHUTDOWN_OFF;
+		hmcp1.channel[i].resolution = RES_16;
+	}
+
+	hmcp1.extCLK = 0;
+	hmcp1.extVREF = 0;
+	hmcp1.hspi = &hspi1;
+	hmcp1.osr = OSR_32;
+	hmcp1.prescale = PRESCALE_1;
+	hmcp1.readType = READ_TYPE;
+
+	hmcp1.pRxBuf = mcpRxBuf;
+	hmcp1.pTxBuf = mcpTxBuf;
+
+	HAL_NVIC_SetPriority(EXTI1_IRQn, 6, 0); // set DR pin interrupt priority
+	mcp3909_init(&hmcp1);
+}
 
 /* USER CODE END 0 */
 
@@ -173,6 +222,7 @@ int main(void)
   MX_WWDG_Init();
   MX_CRC_Init();
   MX_SPI1_Init();
+  MX_SPI3_Init();
 
   /* USER CODE BEGIN 2 */
   Serial2_begin();
@@ -185,10 +235,20 @@ int main(void)
   bxCan_addMaskedFilterStd(0,0,0); // Filter: Status word group (ignore nodeID)
   bxCan_addMaskedFilterExt(0,0,0);
 
-  ltc68041ChainInitStruct hltcinit;
-  //TODO
+  /*
+   * LTC68041 SETUP
+   */
+//  Set up the global ADC configs for the LTC6804
+//  ltc68041ChainInitStruct bmsInitParams[TOTAL_IC];
+//  LTC68041_Initialize(&hbms1, bmsInitParams);
+  hbms1.hspi = &hspi3;
+  if(ltc68041_Initialize(&hbms1) != 0){
+	  for(;;);
+  }
+  HAL_WWDG_Refresh(&hwwdg);
 
-  mcp3909_init(&hspi1, &h3909);
+  EM_Init();
+  HAL_WWDG_Refresh(&hwwdg);
   /* USER CODE END 2 */
 
   /* Create the mutex(es) */
@@ -199,6 +259,19 @@ int main(void)
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
+
+  /* Create the semaphores(s) */
+  /* definition and creation of mcp3909_DR */
+  osSemaphoreDef(mcp3909_DR);
+  mcp3909_DRHandle = osSemaphoreCreate(osSemaphore(mcp3909_DR), 1);
+
+  /* definition and creation of mcp3909_RX */
+  osSemaphoreDef(mcp3909_RX);
+  mcp3909_RXHandle = osSemaphoreCreate(osSemaphore(mcp3909_RX), 1);
+
+  /* definition and creation of bmsTRxComplete */
+  osSemaphoreDef(bmsTRxComplete);
+  bmsTRxCompleteHandle = osSemaphoreCreate(osSemaphore(bmsTRxComplete), 1);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
@@ -252,10 +325,6 @@ int main(void)
   /* definition and creation of mainCanRxQ */
   osMessageQDef(mainCanRxQ, 16, Can_frame_t);
   mainCanRxQHandle = osMessageCreate(osMessageQ(mainCanRxQ), NULL);
-
-  /* definition and creation of MysteryQ */
-  osMessageQDef(MysteryQ, 16, Can_frame_t);
-  MysteryQHandle = osMessageCreate(osMessageQ(MysteryQ), NULL);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -400,15 +469,40 @@ static void MX_SPI1_Init(void)
   hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi1.Init.NSS = SPI_NSS_HARD_OUTPUT;
+  hspi1.Init.NSS = SPI_NSS_SOFT;
   hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
   hspi1.Init.CRCPolynomial = 7;
   hspi1.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
-  hspi1.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  hspi1.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
   if (HAL_SPI_Init(&hspi1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+}
+
+/* SPI3 init function */
+static void MX_SPI3_Init(void)
+{
+
+  hspi3.Instance = SPI3;
+  hspi3.Init.Mode = SPI_MODE_MASTER;
+  hspi3.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi3.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi3.Init.CLKPolarity = SPI_POLARITY_HIGH;
+  hspi3.Init.CLKPhase = SPI_PHASE_2EDGE;
+  hspi3.Init.NSS = SPI_NSS_SOFT;
+  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
+  hspi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi3.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi3.Init.CRCPolynomial = 7;
+  hspi3.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
+  hspi3.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
+  if (HAL_SPI_Init(&hspi3) != HAL_OK)
   {
     Error_Handler();
   }
@@ -459,20 +553,27 @@ static void MX_DMA_Init(void)
 {
   /* DMA controller clock enable */
   LL_AHB1_GRP1_EnableClock(LL_AHB1_GRP1_PERIPH_DMA1);
+  LL_AHB1_GRP1_EnableClock(LL_AHB1_GRP1_PERIPH_DMA2);
 
   /* DMA interrupt init */
-  /* DMA1_Channel2_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 5, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
-  /* DMA1_Channel3_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 5, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
   /* DMA1_Channel6_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel6_IRQn, 5, 0);
+  HAL_NVIC_SetPriority(DMA1_Channel6_IRQn, 6, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel6_IRQn);
   /* DMA1_Channel7_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel7_IRQn, 5, 0);
+  HAL_NVIC_SetPriority(DMA1_Channel7_IRQn, 6, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel7_IRQn);
+  /* DMA2_Channel1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Channel1_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Channel1_IRQn);
+  /* DMA2_Channel2_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Channel2_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Channel2_IRQn);
+  /* DMA2_Channel3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Channel3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Channel3_IRQn);
+  /* DMA2_Channel4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Channel4_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Channel4_IRQn);
 
 }
 
@@ -492,15 +593,28 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, BMS_CS_Pin|BPS_KILL_Pin, GPIO_PIN_SET);
+  /*Configure GPIO pin : GPIO_DR_Pin */
+  GPIO_InitStruct.Pin = GPIO_DR_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIO_DR_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : BMS_CS_Pin BPS_KILL_Pin */
-  GPIO_InitStruct.Pin = BMS_CS_Pin|BPS_KILL_Pin;
+  /*Configure GPIO pins : MCP_CS_Pin BMS_CS_Pin */
+  GPIO_InitStruct.Pin = MCP_CS_Pin|BMS_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : BPS_KILL_Pin */
+  GPIO_InitStruct.Pin = BPS_KILL_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_Init(BPS_KILL_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, MCP_CS_Pin|BPS_KILL_Pin|BMS_CS_Pin, GPIO_PIN_SET);
 
 }
 
@@ -541,6 +655,12 @@ void doRT(void const * argument)
   /* Infinite loop */
   for(;;)
   {
+	mcp3909_wakeup(&hmcp1);
+	xSemaphoreTake(mcp3909_RXHandle, portMAX_DELAY);
+	mcp3909_parseChannelData(&hmcp1);
+	// XXX: Energy metering algorithm
+	mcp3909_sleep(&hmcp1);
+
     osDelay(RT_Interval);
   }
   /* USER CODE END doRT */
@@ -553,7 +673,37 @@ void doSMT(void const * argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(SMT_Interval);
+	  int8_t success = ltc68041_clearCell(&hbms1);
+	  osDelay(3);
+	  success = ltc68041_startCVConv(&hbms1);
+
+	  // Delay enough time but also make sure that the chip doesn't go into sleep mode
+	for(uint8_t i = 0; i < 3 * TOTAL_IC; i++){
+		osDelay(3);
+		wakeup_sleep();
+	}
+
+	// Read the register groups
+	success = ltc68041_readRegGroup(&hbms1, RDCVA);
+	osDelay(2);
+	ltc68041_parseCV(&hbms1, A);
+
+	success = ltc68041_readRegGroup(&hbms1, RDCVB);
+	osDelay(2);
+	ltc68041_parseCV(&hbms1, B);
+
+	success = ltc68041_readRegGroup(&hbms1, RDCVC);
+	osDelay(2);
+	ltc68041_parseCV(&hbms1, C);
+
+	success = ltc68041_readRegGroup(&hbms1, RDCVD);
+	osDelay(2);
+	ltc68041_parseCV(&hbms1, D);
+
+	int8_t statResult = ltc68041_statTest(&hbms1);
+	if(statResult > 0) assert_bps_fault(0,statResult);
+
+    osDelay(SMT_Interval - (8+TOTAL_IC*4));
   }
   /* USER CODE END doSMT */
 }
@@ -565,6 +715,7 @@ void doTMT(void const * argument)
   /* Infinite loop */
   for(;;)
   {
+	  //Michael Pls
     osDelay(TMT_Interval);
   }
   /* USER CODE END doTMT */

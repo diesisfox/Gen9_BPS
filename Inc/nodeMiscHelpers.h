@@ -48,4 +48,7 @@ void setSelfState(nodeState newState);
 nodeState getSelfState();
 void soft_shutdown(void(*usr_clbk)());
 
+void assert_bps_fault(uint16_t addr, uint32_t value);
+void fault_save_data();
+
 #endif /* NODEMISCHELPERS_H_ */
