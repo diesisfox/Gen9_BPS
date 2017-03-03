@@ -61,18 +61,36 @@
 
 /* Private define ------------------------------------------------------------*/
 
+#define BPS_KILL_Pin GPIO_PIN_14
+#define BPS_KILL_GPIO_Port GPIOC
+#define BPS_FAN_Pin GPIO_PIN_15
+#define BPS_FAN_GPIO_Port GPIOC
+#define AMB_ADC_Pin GPIO_PIN_0
+#define AMB_ADC_GPIO_Port GPIOA
 #define GPIO_DR_Pin GPIO_PIN_1
 #define GPIO_DR_GPIO_Port GPIOA
 #define VCP_TX_Pin GPIO_PIN_2
 #define VCP_TX_GPIO_Port GPIOA
 #define MCP_CS_Pin GPIO_PIN_3
 #define MCP_CS_GPIO_Port GPIOA
-#define BPS_KILL_Pin GPIO_PIN_8
-#define BPS_KILL_GPIO_Port GPIOA
-#define BMS_CS_Pin GPIO_PIN_10
+#define BMS_CS_Pin GPIO_PIN_4
 #define BMS_CS_GPIO_Port GPIOA
+#define MUX1_ADC_Pin GPIO_PIN_0
+#define MUX1_ADC_GPIO_Port GPIOB
+#define MUX2_ADC_Pin GPIO_PIN_1
+#define MUX2_ADC_GPIO_Port GPIOB
+#define MUX_EN_Pin GPIO_PIN_8
+#define MUX_EN_GPIO_Port GPIOA
+#define MUX_SEL0_Pin GPIO_PIN_9
+#define MUX_SEL0_GPIO_Port GPIOA
+#define MUX_SEL1_Pin GPIO_PIN_10
+#define MUX_SEL1_GPIO_Port GPIOA
 #define VCP_RX_Pin GPIO_PIN_15
 #define VCP_RX_GPIO_Port GPIOA
+#define MUX_SEL2_Pin GPIO_PIN_6
+#define MUX_SEL2_GPIO_Port GPIOB
+#define MUX_SEL3_Pin GPIO_PIN_7
+#define MUX_SEL3_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */

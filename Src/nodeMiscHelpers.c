@@ -134,6 +134,8 @@ void assert_bps_fault(uint16_t addr, uint32_t value){	//addr and value of out of
 	// Broadcast bps fault to main CAN
 	Can_frame_t newFrame;
 	newFrame.id = bpsTrip;
+	newFrame.isExt = 0;
+	newFrame.isRemote = 0;
 	newFrame.dlc = bpsTrip_DLC;
 	newFrame.Data[0] = addr >> 8;
 	newFrame.Data[1] = addr & 0xf;
@@ -141,6 +143,8 @@ void assert_bps_fault(uint16_t addr, uint32_t value){	//addr and value of out of
 		newFrame.Data[5-i] = (value >> (8*i)) & 0xff;	// Convert uint32_t -> uint8_t
 	}
 	bxCan_sendFrame(&newFrame);
+	osDelay(1);
+//	for(;;);
 
 	//assert signal
 	HAL_GPIO_WritePin(BPS_KILL_GPIO_Port, BPS_KILL_Pin, RESET);

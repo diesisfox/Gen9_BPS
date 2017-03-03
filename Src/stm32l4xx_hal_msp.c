@@ -95,6 +95,67 @@ void HAL_MspInit(void)
   /* USER CODE END MspInit 1 */
 }
 
+void HAL_ADC_MspInit(ADC_HandleTypeDef* hadc)
+{
+
+  GPIO_InitTypeDef GPIO_InitStruct;
+  if(hadc->Instance==ADC1)
+  {
+  /* USER CODE BEGIN ADC1_MspInit 0 */
+
+  /* USER CODE END ADC1_MspInit 0 */
+    /* Peripheral clock enable */
+    __HAL_RCC_ADC_CLK_ENABLE();
+  
+    /**ADC1 GPIO Configuration    
+    PA0-CK_IN     ------> ADC1_IN5
+    PB0     ------> ADC1_IN15
+    PB1     ------> ADC1_IN16 
+    */
+    GPIO_InitStruct.Pin = AMB_ADC_Pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG_ADC_CONTROL;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(AMB_ADC_GPIO_Port, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = MUX1_ADC_Pin|MUX2_ADC_Pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG_ADC_CONTROL;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* USER CODE BEGIN ADC1_MspInit 1 */
+
+  /* USER CODE END ADC1_MspInit 1 */
+  }
+
+}
+
+void HAL_ADC_MspDeInit(ADC_HandleTypeDef* hadc)
+{
+
+  if(hadc->Instance==ADC1)
+  {
+  /* USER CODE BEGIN ADC1_MspDeInit 0 */
+
+  /* USER CODE END ADC1_MspDeInit 0 */
+    /* Peripheral clock disable */
+    __HAL_RCC_ADC_CLK_DISABLE();
+  
+    /**ADC1 GPIO Configuration    
+    PA0-CK_IN     ------> ADC1_IN5
+    PB0     ------> ADC1_IN15
+    PB1     ------> ADC1_IN16 
+    */
+    HAL_GPIO_DeInit(AMB_ADC_GPIO_Port, AMB_ADC_Pin);
+
+    HAL_GPIO_DeInit(GPIOB, MUX1_ADC_Pin|MUX2_ADC_Pin);
+
+  }
+  /* USER CODE BEGIN ADC1_MspDeInit 1 */
+
+  /* USER CODE END ADC1_MspDeInit 1 */
+
+}
+
 void HAL_CAN_MspInit(CAN_HandleTypeDef* hcan)
 {
 

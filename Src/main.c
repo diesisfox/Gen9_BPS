@@ -64,6 +64,8 @@
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
+ADC_HandleTypeDef hadc1;
+
 CAN_HandleTypeDef hcan1;
 
 CRC_HandleTypeDef hcrc;
@@ -97,7 +99,6 @@ osSemaphoreId bmsTRxCompleteHandle;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
-MCP3909HandleTypeDef h3909;
 bmsChainHandleTypeDef hbms1;
 
 MCP3909HandleTypeDef hmcp1;
@@ -126,6 +127,7 @@ static void MX_WWDG_Init(void);
 static void MX_CRC_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_SPI3_Init(void);
+static void MX_ADC1_Init(void);
 void doApplication(void const * argument);
 void doProcessCan(void const * argument);
 void doRT(void const * argument);
@@ -139,7 +141,7 @@ void TmrSendHB(void const * argument);
 
 // Data Ready pin triggered callback (PA1)
 void HAL_GPIO_EXTI_Callback(uint16_t pinNum){
-	if(pinNum & GPIO_PIN_1){
+	if(pinNum == GPIO_DR_Pin){
 		HAL_NVIC_DisableIRQ(EXTI1_IRQn);
 		mcp3909_readAllChannels(&hmcp1,hmcp1.pRxBuf);
 	}
@@ -165,10 +167,6 @@ void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi){
 	}
 }
 
-void EM_Init(void);
-/* USER CODE END PFP */
-
-/* USER CODE BEGIN 0 */
 void EM_Init(){
 	hmcp1.phase[0] = 0;
 	hmcp1.phase[1] = 0;
@@ -196,6 +194,9 @@ void EM_Init(){
 	HAL_NVIC_SetPriority(EXTI1_IRQn, 6, 0); // set DR pin interrupt priority
 	mcp3909_init(&hmcp1);
 }
+/* USER CODE END PFP */
+
+/* USER CODE BEGIN 0 */
 
 /* USER CODE END 0 */
 
@@ -203,7 +204,9 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+#define DISABLE_RT
+//#define DISABLE_SMT
+#define DISABLE_TMT
   /* USER CODE END 1 */
 
   /* MCU Configuration----------------------------------------------------------*/
@@ -223,6 +226,7 @@ int main(void)
   MX_CRC_Init();
   MX_SPI1_Init();
   MX_SPI3_Init();
+  MX_ADC1_Init();
 
   /* USER CODE BEGIN 2 */
   Serial2_begin();
@@ -235,6 +239,7 @@ int main(void)
   bxCan_addMaskedFilterStd(0,0,0); // Filter: Status word group (ignore nodeID)
   bxCan_addMaskedFilterExt(0,0,0);
 
+#ifndef DISABLE_SMT
   /*
    * LTC68041 SETUP
    */
@@ -246,9 +251,12 @@ int main(void)
 	  for(;;);
   }
   HAL_WWDG_Refresh(&hwwdg);
+#endif
 
+#ifndef DISABLE_RT
   EM_Init();
   HAL_WWDG_Refresh(&hwwdg);
+#endif
   /* USER CODE END 2 */
 
   /* Create the mutex(es) */
@@ -382,7 +390,7 @@ void SystemClock_Config(void)
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
@@ -390,8 +398,9 @@ void SystemClock_Config(void)
     Error_Handler();
   }
 
-  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART2;
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USART2|RCC_PERIPHCLK_ADC;
   PeriphClkInit.Usart2ClockSelection = RCC_USART2CLKSOURCE_PCLK1;
+  PeriphClkInit.AdcClockSelection = RCC_ADCCLKSOURCE_SYSCLK;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
@@ -416,12 +425,56 @@ void SystemClock_Config(void)
   HAL_NVIC_SetPriority(SysTick_IRQn, 15, 0);
 }
 
+/* ADC1 init function */
+static void MX_ADC1_Init(void)
+{
+
+  ADC_ChannelConfTypeDef sConfig;
+
+    /**Common config 
+    */
+  hadc1.Instance = ADC1;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV1;
+  hadc1.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.LowPowerAutoWait = DISABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.DiscontinuousConvMode = DISABLE;
+  hadc1.Init.NbrOfDiscConversion = 1;
+  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc1.Init.DMAContinuousRequests = DISABLE;
+  hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+  hadc1.Init.OversamplingMode = DISABLE;
+  if (HAL_ADC_Init(&hadc1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+    /**Configure Regular Channel 
+    */
+  sConfig.Channel = ADC_CHANNEL_5;
+  sConfig.Rank = 1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
+  sConfig.SingleDiff = ADC_SINGLE_ENDED;
+  sConfig.OffsetNumber = ADC_OFFSET_NONE;
+  sConfig.Offset = 0;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+}
+
 /* CAN1 init function */
 static void MX_CAN1_Init(void)
 {
 
   hcan1.Instance = CAN1;
-  hcan1.Init.Prescaler = 10;
+  hcan1.Init.Prescaler = 5;
   hcan1.Init.Mode = CAN_MODE_NORMAL;
   hcan1.Init.SJW = CAN_SJW_3TQ;
   hcan1.Init.BS1 = CAN_BS1_12TQ;
@@ -590,8 +643,28 @@ static void MX_GPIO_Init(void)
   GPIO_InitTypeDef GPIO_InitStruct;
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, BPS_KILL_Pin|BPS_FAN_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, MCP_CS_Pin|BMS_CS_Pin|MUX_EN_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, MUX_SEL0_Pin|MUX_SEL1_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, MUX_SEL2_Pin|MUX_SEL3_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : BPS_KILL_Pin BPS_FAN_Pin */
+  GPIO_InitStruct.Pin = BPS_KILL_Pin|BPS_FAN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pin : GPIO_DR_Pin */
   GPIO_InitStruct.Pin = GPIO_DR_Pin;
@@ -599,22 +672,40 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIO_DR_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : MCP_CS_Pin BMS_CS_Pin */
-  GPIO_InitStruct.Pin = MCP_CS_Pin|BMS_CS_Pin;
+  /*Configure GPIO pin : MCP_CS_Pin */
+  GPIO_InitStruct.Pin = MCP_CS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  HAL_GPIO_Init(MCP_CS_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : BPS_KILL_Pin */
-  GPIO_InitStruct.Pin = BPS_KILL_Pin;
+  /*Configure GPIO pin : BMS_CS_Pin */
+  GPIO_InitStruct.Pin = BMS_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(BMS_CS_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : MUX_EN_Pin */
+  GPIO_InitStruct.Pin = MUX_EN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(BPS_KILL_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(MUX_EN_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, MCP_CS_Pin|BPS_KILL_Pin|BMS_CS_Pin, GPIO_PIN_SET);
+  /*Configure GPIO pins : MUX_SEL0_Pin MUX_SEL1_Pin */
+  GPIO_InitStruct.Pin = MUX_SEL0_Pin|MUX_SEL1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : MUX_SEL2_Pin MUX_SEL3_Pin */
+  GPIO_InitStruct.Pin = MUX_SEL2_Pin|MUX_SEL3_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
 }
 
@@ -652,6 +743,7 @@ void doProcessCan(void const * argument)
 void doRT(void const * argument)
 {
   /* USER CODE BEGIN doRT */
+#ifndef DISABLE_RT
   /* Infinite loop */
   for(;;)
   {
@@ -663,6 +755,11 @@ void doRT(void const * argument)
 
     osDelay(RT_Interval);
   }
+#else
+  for(;;){
+	  osDelay(1000);
+  }
+#endif
   /* USER CODE END doRT */
 }
 
@@ -670,6 +767,13 @@ void doRT(void const * argument)
 void doSMT(void const * argument)
 {
   /* USER CODE BEGIN doSMT */
+#ifndef DISABLE_SMT
+
+	static Can_frame_t newFrame;
+	newFrame.dlc = 6;
+	newFrame.isExt = 0;
+	newFrame.isRemote = 0;
+
   /* Infinite loop */
   for(;;)
   {
@@ -700,11 +804,37 @@ void doSMT(void const * argument)
 	osDelay(2);
 	ltc68041_parseCV(&hbms1, D);
 
-	int8_t statResult = ltc68041_statTest(&hbms1);
-	if(statResult > 0) assert_bps_fault(0,statResult);
+	success = ltc68041_readRegGroup(&hbms1, RDSTATB);
+	osDelay(2);
+	ltc68041_parseSTAT(&hbms1, B);
+
+	for(int i=0; i<3; i++){
+		for(int j=0; j<12; j+=3){
+			newFrame.id = 0x350+i*4+j/3;
+			newFrame.Data[0] = hbms1.board[i].CVR[j+0] >> 8;
+			newFrame.Data[1] = hbms1.board[i].CVR[j+0] & 0xff;
+			newFrame.Data[2] = hbms1.board[i].CVR[j+1] >> 8;
+			newFrame.Data[3] = hbms1.board[i].CVR[j+1] & 0xff;
+			newFrame.Data[4] = hbms1.board[i].CVR[j+2] >> 8;
+			newFrame.Data[5] = hbms1.board[i].CVR[j+2] & 0xff;
+			bxCan_sendFrame(&newFrame);
+		}
+	}
+
+	//Check OV UV flags
+	for(int i=0; i<3; i++){
+		if(hbms1.board[i].STATR[5] || (hbms1.board[i].STATR[6] & 0xff)){
+			assert_bps_fault(0,0);
+		}
+	}
 
     osDelay(SMT_Interval - (8+TOTAL_IC*4));
   }
+#else
+  for(;;){
+	  osDelay(1000);
+  }
+#endif
   /* USER CODE END doSMT */
 }
 
@@ -712,12 +842,19 @@ void doSMT(void const * argument)
 void doTMT(void const * argument)
 {
   /* USER CODE BEGIN doTMT */
+#ifndef DISABLE_TMT
   /* Infinite loop */
   for(;;)
   {
 	  //Michael Pls
     osDelay(TMT_Interval);
   }
+
+#else
+  for(;;){
+	  osDelay(1000);
+  }
+#endif
   /* USER CODE END doTMT */
 }
 

@@ -40,7 +40,7 @@
 #define WD_Interval		16			// Watdog timer refresh interval (soft ms) | MUST BE LESS THAN 26!!!
 
 #define RT_Interval		50
-#define SMT_Interval	500
+#define SMT_Interval	1000
 #define TMT_Interval	500
 
 #define RT_Broadcast	20			//Multiplier of RT_Interval
