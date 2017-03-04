@@ -14,6 +14,7 @@
 #define ST_VALUE	  0x6AAA						// Expected self-test value
 #define MD_BITS		  (MD_MODE_2  << MD_OFFSET)		// 7Khz / 3Khz ADC Mode group
 #define VOV			  (2715U)	// Overvoltage set point 4.344V
+//#define VOV			  (2500U)	// Overvoltage set point 4000.0 mV
 #define VUV			  (1720U)	// Undervoltage set point 2.754V
 // #define CB_ON	  // Enable cell-balancing
 

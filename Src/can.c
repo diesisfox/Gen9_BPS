@@ -409,6 +409,8 @@ int bxCan_sendFrame(Can_frame_t *frame){
 	if(fail == pdPASS){
 		// Only try to transmit if message successfully placed onto Tx Q
 		fail = bxCanDoTx(0);		// Call bxCAN Tx function from non-ISR context
+	}else{
+		fail = 1;
 	}
 	return fail;
 }

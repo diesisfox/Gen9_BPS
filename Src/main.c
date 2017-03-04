@@ -327,7 +327,7 @@ int main(void)
 
   /* Create the queue(s) */
   /* definition and creation of mainCanTxQ */
-  osMessageQDef(mainCanTxQ, 16, Can_frame_t);
+  osMessageQDef(mainCanTxQ, 32, Can_frame_t);
   mainCanTxQHandle = osMessageCreate(osMessageQ(mainCanTxQ), NULL);
 
   /* definition and creation of mainCanRxQ */
@@ -747,13 +747,17 @@ void doRT(void const * argument)
   /* Infinite loop */
   for(;;)
   {
-	mcp3909_wakeup(&hmcp1);
-	xSemaphoreTake(mcp3909_RXHandle, portMAX_DELAY);
-	mcp3909_parseChannelData(&hmcp1);
-	// XXX: Energy metering algorithm
-	mcp3909_sleep(&hmcp1);
+	  if((selfStatusWord & 0x07) == ACTIVE){
+		mcp3909_wakeup(&hmcp1);
+		xSemaphoreTake(mcp3909_RXHandle, portMAX_DELAY);
+		mcp3909_parseChannelData(&hmcp1);
+		// XXX: Energy metering algorithm
+		mcp3909_sleep(&hmcp1);
 
-    osDelay(RT_Interval);
+		osDelay(RT_Interval);
+	  }else{
+		  osDelay(1);
+	  }
   }
 #else
   for(;;){
@@ -770,65 +774,88 @@ void doSMT(void const * argument)
 #ifndef DISABLE_SMT
 
 	static Can_frame_t newFrame;
-	newFrame.dlc = 6;
+	newFrame.dlc = 8;
 	newFrame.isExt = 0;
 	newFrame.isRemote = 0;
 
   /* Infinite loop */
   for(;;)
   {
-	  int8_t success = ltc68041_clearCell(&hbms1);
-	  osDelay(3);
-	  success = ltc68041_startCVConv(&hbms1);
+	  if((selfStatusWord & 0x07) == ACTIVE){
+		  int8_t success = ltc68041_clearCell(&hbms1);
+		  osDelay(3);
+		  success = ltc68041_startCVConv(&hbms1);
 
-	  // Delay enough time but also make sure that the chip doesn't go into sleep mode
-	for(uint8_t i = 0; i < 3 * TOTAL_IC; i++){
-		osDelay(3);
-		wakeup_sleep();
-	}
-
-	// Read the register groups
-	success = ltc68041_readRegGroup(&hbms1, RDCVA);
-	osDelay(2);
-	ltc68041_parseCV(&hbms1, A);
-
-	success = ltc68041_readRegGroup(&hbms1, RDCVB);
-	osDelay(2);
-	ltc68041_parseCV(&hbms1, B);
-
-	success = ltc68041_readRegGroup(&hbms1, RDCVC);
-	osDelay(2);
-	ltc68041_parseCV(&hbms1, C);
-
-	success = ltc68041_readRegGroup(&hbms1, RDCVD);
-	osDelay(2);
-	ltc68041_parseCV(&hbms1, D);
-
-	success = ltc68041_readRegGroup(&hbms1, RDSTATB);
-	osDelay(2);
-	ltc68041_parseSTAT(&hbms1, B);
-
-	for(int i=0; i<3; i++){
-		for(int j=0; j<12; j+=3){
-			newFrame.id = 0x350+i*4+j/3;
-			newFrame.Data[0] = hbms1.board[i].CVR[j+0] >> 8;
-			newFrame.Data[1] = hbms1.board[i].CVR[j+0] & 0xff;
-			newFrame.Data[2] = hbms1.board[i].CVR[j+1] >> 8;
-			newFrame.Data[3] = hbms1.board[i].CVR[j+1] & 0xff;
-			newFrame.Data[4] = hbms1.board[i].CVR[j+2] >> 8;
-			newFrame.Data[5] = hbms1.board[i].CVR[j+2] & 0xff;
-			bxCan_sendFrame(&newFrame);
+		  // Delay enough time but also make sure that the chip doesn't go into sleep mode
+		for(uint8_t i = 0; i < 3 * TOTAL_IC; i++){
+			osDelay(3);
+			wakeup_sleep();
 		}
-	}
 
-	//Check OV UV flags
-	for(int i=0; i<3; i++){
-		if(hbms1.board[i].STATR[5] || (hbms1.board[i].STATR[6] & 0xff)){
-			assert_bps_fault(0,0);
+		// Read the register groups
+		success = ltc68041_readRegGroup(&hbms1, RDCVA);
+		osDelay(2);
+		ltc68041_parseCV(&hbms1, A);
+
+		success = ltc68041_readRegGroup(&hbms1, RDCVB);
+		osDelay(2);
+		ltc68041_parseCV(&hbms1, B);
+
+		success = ltc68041_readRegGroup(&hbms1, RDCVC);
+		osDelay(2);
+		ltc68041_parseCV(&hbms1, C);
+
+		success = ltc68041_readRegGroup(&hbms1, RDCVD);
+		osDelay(2);
+		ltc68041_parseCV(&hbms1, D);
+
+//		success = ltc68041_readRegGroup(&hbms1, RDSTATB);
+//		osDelay(2);
+//		ltc68041_parseSTAT(&hbms1, B);
+
+#define vovTo100uV(x) ((x+1)*16)
+
+		static uint8_t ohno[] = "oh no!\n";
+
+		for(uint8_t i=0; i<3; i++){
+			for(uint8_t j=0; j<12; j+=4){
+				newFrame.id = voltOffset+i*3+j/4;
+				newFrame.Data[0] = hbms1.board[i].CVR[j+0] >> 8;
+				newFrame.Data[1] = hbms1.board[i].CVR[j+0] & 0xff;
+				newFrame.Data[2] = hbms1.board[i].CVR[j+1] >> 8;
+				newFrame.Data[3] = hbms1.board[i].CVR[j+1] & 0xff;
+				newFrame.Data[4] = hbms1.board[i].CVR[j+2] >> 8;
+				newFrame.Data[5] = hbms1.board[i].CVR[j+2] & 0xff;
+				newFrame.Data[6] = hbms1.board[i].CVR[j+3] >> 8;
+				newFrame.Data[7] = hbms1.board[i].CVR[j+3] & 0xff;
+				if(bxCan_sendFrame(&newFrame) != 0){
+					Serial2_writeBuf(ohno);
+				}
+//				static uint8_t msg[3];
+//				msg[0] = hbms1.board[i].CVR[j+0] >> 8;
+//				msg[1] = hbms1.board[i].CVR[j+0] & 0xff;
+//				Serial2_writeBuf(msg);
+				for(uint8_t k=0; k<4; k++){
+					if(hbms1.board[i].CVR[j+k] > vovTo100uV(VOV) || hbms1.board[i].CVR[j+k] < vovTo100uV(VUV)){
+						Serial2_writeBuf(ohno);
+						assert_bps_fault(i*3+j/4, hbms1.board[i].CVR[j+k]);
+					}
+				}
+			}
+			osDelay(1);
 		}
-	}
 
-    osDelay(SMT_Interval - (8+TOTAL_IC*4));
+		//Check OV UV flags
+//		for(int i=0; i<3; i++){
+//			if(hbms1.board[i].STATR[5] || (hbms1.board[i].STATR[6] & 0xff)){
+//				assert_bps_fault(i,0);
+//			}
+//		}
+
+		osDelay(SMT_Interval - (8+TOTAL_IC*4));
+	  }else{
+		  osDelay(1);
+	  }
   }
 #else
   for(;;){
@@ -846,8 +873,12 @@ void doTMT(void const * argument)
   /* Infinite loop */
   for(;;)
   {
+	  if((selfStatusWord & 0x07) == ACTIVE){
 	  //Michael Pls
-    osDelay(TMT_Interval);
+		  osDelay(TMT_Interval);
+	  }else{
+		  osDelay(1);
+	  }
   }
 
 #else
