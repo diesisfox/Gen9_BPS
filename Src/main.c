@@ -204,8 +204,8 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-#define DISABLE_RT
-//#define DISABLE_SMT
+//#define DISABLE_RT
+#define DISABLE_SMT
 #define DISABLE_TMT
   /* USER CODE END 1 */
 
@@ -520,10 +520,10 @@ static void MX_SPI1_Init(void)
   hspi1.Init.Mode = SPI_MODE_MASTER;
   hspi1.Init.Direction = SPI_DIRECTION_2LINES;
   hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;
+  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -622,10 +622,10 @@ static void MX_DMA_Init(void)
   HAL_NVIC_SetPriority(DMA2_Channel2_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA2_Channel2_IRQn);
   /* DMA2_Channel3_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA2_Channel3_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(DMA2_Channel3_IRQn, 6, 0);
   HAL_NVIC_EnableIRQ(DMA2_Channel3_IRQn);
   /* DMA2_Channel4_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA2_Channel4_IRQn, 0, 0);
+  HAL_NVIC_SetPriority(DMA2_Channel4_IRQn, 6, 0);
   HAL_NVIC_EnableIRQ(DMA2_Channel4_IRQn);
 
 }
@@ -672,19 +672,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIO_DR_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : MCP_CS_Pin */
-  GPIO_InitStruct.Pin = MCP_CS_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  HAL_GPIO_Init(MCP_CS_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : BMS_CS_Pin */
-  GPIO_InitStruct.Pin = BMS_CS_Pin;
+  /*Configure GPIO pins : MCP_CS_Pin BMS_CS_Pin */
+  GPIO_InitStruct.Pin = MCP_CS_Pin|BMS_CS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  HAL_GPIO_Init(BMS_CS_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : MUX_EN_Pin */
   GPIO_InitStruct.Pin = MUX_EN_Pin;
@@ -744,15 +737,56 @@ void doRT(void const * argument)
 {
   /* USER CODE BEGIN doRT */
 #ifndef DISABLE_RT
+
+	static Can_frame_t newFrame;
+	newFrame.isExt = 0;
+	newFrame.isRemote = 0;
+	newFrame.id = 0x201;
+
+	static uint8_t ohno[] = "oh no!\n";
+
   /* Infinite loop */
   for(;;)
   {
 	  if((selfStatusWord & 0x07) == ACTIVE){
 		mcp3909_wakeup(&hmcp1);
+		osDelay(1);
 		xSemaphoreTake(mcp3909_RXHandle, portMAX_DELAY);
 		mcp3909_parseChannelData(&hmcp1);
+		osDelay(1);
 		// XXX: Energy metering algorithm
 		mcp3909_sleep(&hmcp1);
+
+		Serial2_writeBuf(ohno);
+
+//		for(uint8_t i=0; i<3; i++){
+//			for(uint8_t j=0; j<12; j+=4){
+//				newFrame.id = voltOffset+i*3+j/4;
+//				newFrame.Data[0] = hbms1.board[i].CVR[j+0] >> 8;
+//				newFrame.Data[1] = hbms1.board[i].CVR[j+0] & 0xff;
+//				newFrame.Data[2] = hbms1.board[i].CVR[j+1] >> 8;
+//				newFrame.Data[3] = hbms1.board[i].CVR[j+1] & 0xff;
+//				newFrame.Data[4] = hbms1.board[i].CVR[j+2] >> 8;
+//				newFrame.Data[5] = hbms1.board[i].CVR[j+2] & 0xff;
+//				newFrame.Data[6] = hbms1.board[i].CVR[j+3] >> 8;
+//				newFrame.Data[7] = hbms1.board[i].CVR[j+3] & 0xff;
+//				if(bxCan_sendFrame(&newFrame) != 0){
+//					Serial2_writeBuf(ohno);
+//				}
+////				static uint8_t msg[3];
+////				msg[0] = hbms1.board[i].CVR[j+0] >> 8;
+////				msg[1] = hbms1.board[i].CVR[j+0] & 0xff;
+////				Serial2_writeBuf(msg);
+//				for(uint8_t k=0; k<4; k++){
+//					if(hbms1.board[i].CVR[j+k] > vovTo100uV(VOV) || hbms1.board[i].CVR[j+k] < vovTo100uV(VUV)){
+//						Serial2_writeBuf(ohno);
+//						assert_bps_fault(i*3+j/4, hbms1.board[i].CVR[j+k]);
+//					}
+//				}
+//			}
+//			osDelay(1);
+//		}
+
 
 		osDelay(RT_Interval);
 	  }else{

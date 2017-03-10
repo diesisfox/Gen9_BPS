@@ -383,7 +383,7 @@ int8_t ltc68041_cvTest(bmsChainHandleTypeDef * hbms){
 			regVal = ((hbms->spiRxBuf)[i + 1 + current_ic*TX_REG_LEN + TX_CMD_LEN] << 8) | (hbms->spiRxBuf)[i + current_ic*TX_REG_LEN + TX_CMD_LEN];
 			if( regVal != ST_VALUE){
 				// Register group value mismatch
-				retCode = 2;
+				retCode = 1;
 				break;
 			}
 		}
